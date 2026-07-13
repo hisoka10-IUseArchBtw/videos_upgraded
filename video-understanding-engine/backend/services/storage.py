@@ -90,3 +90,15 @@ def download_video_file(object_name: str, file_path: str) -> bool:
     except S3Error as e:
         print(f"Error downloading from MinIO: {e}")
         return False
+
+def upload_local_file(local_path: str, object_name: str) -> bool:
+    """
+    Uploads a local file from the disk to MinIO.
+    """
+    ensure_bucket_exists()
+    try:
+        minio_client.fput_object(BUCKET_NAME, object_name, local_path)
+        return True
+    except S3Error as e:
+        print(f"Error uploading local file to MinIO: {e}")
+        return False

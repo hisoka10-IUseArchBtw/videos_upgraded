@@ -10,6 +10,6 @@ celery
 redis
 minio
 prometheus-fastapi-instrumentator
-pgvector
-google-generativeai
+qdrant-client
+google-genai
 ffmpeg-python
