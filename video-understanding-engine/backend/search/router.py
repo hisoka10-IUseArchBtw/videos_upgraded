@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.database import get_db
 from backend.auth.jwt import get_current_user
 from backend.models.User.user_model import User
 from backend.models.Video.video_model import Video

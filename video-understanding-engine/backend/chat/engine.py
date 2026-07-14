@@ -1,6 +1,6 @@
 import uuid
 from backend.search.service import SearchService
-from backend.ai.providers.gemini import GeminiProvider
+from backend.ai.providers import get_provider
 from backend.ai.prompts.chat_prompt import CHAT_PROMPT
 
 class ChatEngine:
@@ -9,7 +9,7 @@ class ChatEngine:
     """
     def __init__(self):
         self.search_service = SearchService()
-        self.ai_provider = GeminiProvider()
+        self.ai_provider = get_provider()
         
     async def generate_chat_response(self, video_id: str, question: str) -> str:
         # Retrieve relevant chunks using existing semantic search

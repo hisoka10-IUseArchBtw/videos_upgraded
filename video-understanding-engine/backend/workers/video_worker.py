@@ -3,8 +3,6 @@ import time
 import asyncio
 import tempfile
 import ffmpeg
-from google import genai
-from google.genai import types
 from typing import List, Dict
 
 from backend.core.celery_app import celery_app
@@ -20,9 +18,6 @@ from backend.ai.chapters.generator import generate_and_store_chapters
 from backend.ai.flashcards.generator import generate_and_store_flashcards
 from backend.ai.quiz.generator import generate_and_store_quiz
 from backend.ai.metrics import AI_REQUEST_LATENCY_SECONDS
-
-# Configure Gemini for transcription
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 def extract_audio(video_path: str, audio_path: str):
     """Uses ffmpeg to extract audio to a wav/mp3 file."""
@@ -83,63 +78,67 @@ def extract_scene_keyframes(video_path: str, output_dir: str) -> list:
         print(f"FFmpeg error during frame extraction: {e.stderr.decode() if e.stderr else e}")
         return []
 
-def transcribe_audio_with_gemini(audio_path: str) -> List[Dict]:
-    """Uploads the audio to Gemini and gets a timestamped JSON transcript."""
-    print(f"Uploading {audio_path} to Gemini...")
-    audio_file = client.files.upload(file=audio_path)
-    
-    # Wait for the file to be processed
-    while audio_file.state.name == 'PROCESSING':
-        print('.', end='')
-        time.sleep(2)
-        audio_file = client.files.get(name=audio_file.name)
-    
-    if audio_file.state.name == 'FAILED':
-        raise ValueError("Audio processing failed in Gemini.")
-    
-    print("\nTranscribing...")
-    
-    prompt = """Please provide a complete transcript of this audio file.
-Format your response as a valid JSON array of objects.
-Each object should have:
-- "text": The spoken text.
-- "start_time": The start time in seconds (float).
-- "end_time": The end time in seconds (float).
 
-Do not include any other text besides the JSON array."""
-
+def transcribe_audio_with_groq(audio_path: str) -> List[Dict]:
+    """Transcribes audio using Groq Whisper model and parses segments to match format."""
+    print(f"Fallback: Transcribing {audio_path} using Groq Whisper...")
+    from groq import Groq
+    groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    
     start_time = time.time()
-    response = client.models.generate_content(
-        model="gemini-1.5-flash",
-        contents=[prompt, audio_file],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
+    with open(audio_path, "rb") as file:
+        response = groq_client.audio.transcriptions.create(
+            file=(os.path.basename(audio_path), file.read()),
+            model="whisper-large-v3",
+            response_format="verbose_json",
         )
-    )
     duration = time.time() - start_time
-    AI_REQUEST_LATENCY_SECONDS.labels(model="gemini-1.5-flash", operation="transcribe").observe(duration)
+    AI_REQUEST_LATENCY_SECONDS.labels(model="whisper-large-v3", operation="transcribe").observe(duration)
     
-    try:
-        client.files.delete(name=audio_file.name)
-    except Exception as e:
-        print(f"Failed to delete gemini file: {e}")
+    segments = getattr(response, "segments", [])
+    if not segments and isinstance(response, dict):
+        segments = response.get("segments", [])
         
-    import json
-    try:
-        return json.loads(response.text)
-    except Exception as e:
-        print(f"Failed to parse transcript JSON: {e}")
-        raise e
+    chunks = []
+    for segment in segments:
+        if hasattr(segment, "text"):
+            text = segment.text
+            start = float(segment.start)
+            end = float(segment.end)
+        elif isinstance(segment, dict):
+            text = segment.get("text", "")
+            start = float(segment.get("start", 0.0))
+            end = float(segment.get("end", 0.0))
+        else:
+            continue
+            
+        chunks.append({
+            "text": text,
+            "start_time": start,
+            "end_time": end
+        })
+    return chunks
+
+def transcribe_audio_with_fallback(audio_path: str) -> List[Dict]:
+    return transcribe_audio_with_groq(audio_path)
 
 async def async_process_video(video_id_str: str):
     async with AsyncSessionLocal() as db:
-        # 1. Fetch video record
-        result = await db.execute(select(Video).where(Video.id == video_id_str))
-        video = result.scalars().first()
-        if not video:
-            print(f"Video {video_id_str} not found in DB.")
+        # Helper to reload and check if video still exists
+        async def reload_video() -> Video:
+            res = await db.execute(select(Video).where(Video.id == video_id_str))
+            v = res.scalars().first()
+            if not v:
+                raise ValueError(f"Video {video_id_str} was deleted from database.")
+            return v
+
+        try:
+            # 1. Fetch video record
+            video = await reload_video()
+        except ValueError as val_err:
+            print(val_err)
             return
-            
+
         try:
             video.status = "PROCESSING"
             await db.commit()
@@ -158,6 +157,7 @@ async def async_process_video(video_id_str: str):
                 print("Extracting metadata...")
                 metadata = await asyncio.to_thread(extract_metadata, video_file_path)
                 if metadata:
+                    video = await reload_video()
                     video.duration = metadata.get("duration")
                     video.resolution = metadata.get("resolution")
                     video.fps = metadata.get("fps")
@@ -169,13 +169,14 @@ async def async_process_video(video_id_str: str):
                 await asyncio.to_thread(extract_audio, video_file_path, audio_file_path)
                 
                 # 4. Transcribe Audio
-                print("Transcribing audio with Gemini...")
-                transcript_chunks = await asyncio.to_thread(transcribe_audio_with_gemini, audio_file_path)
+                print("Transcribing audio with fallback mechanism...")
+                transcript_chunks = await asyncio.to_thread(transcribe_audio_with_fallback, audio_file_path)
                 
                 full_transcript = " ".join([chunk.get("text", "") for chunk in transcript_chunks])
                 
                 # 5. Embeddings — index transcript chunks in Qdrant
                 print("Generating and storing vector embeddings (transcript)...")
+                video = await reload_video()
                 await embed_and_store_chunks(db, video.id, transcript_chunks, chunk_type="transcript")
                 
                 # 5.5 Vision Intelligence (Frames & OCR)
@@ -185,6 +186,7 @@ async def async_process_video(video_id_str: str):
                 frame_paths = await asyncio.to_thread(extract_scene_keyframes, video_file_path, frames_dir)
                 
                 # Upload frames to MinIO
+                video = await reload_video()
                 for frame_path in frame_paths:
                     filename = os.path.basename(frame_path)
                     object_name = f"frames/{video.id}/{filename}"
@@ -194,11 +196,13 @@ async def async_process_video(video_id_str: str):
                 ocr_results = await asyncio.to_thread(process_frames_for_ocr, frame_paths)
                 if ocr_results:
                     print("Indexing OCR chunks in Qdrant...")
+                    video = await reload_video()
                     await embed_and_store_chunks(db, video.id, ocr_results, chunk_type="ocr")
                 
                 # 6. Generate AI Outputs sequentially to prevent AsyncSession concurrency issues
                 print("Generating Chapters, Summaries, Flashcards, and Quiz...")
                 
+                video = await reload_video()
                 chapters = await generate_and_store_chapters(db, video.id, transcript_chunks)
                 if chapters:
                     chapter_chunks = []
@@ -209,14 +213,17 @@ async def async_process_video(video_id_str: str):
                             "end_time": ch.end_time
                         })
                     print("Indexing chapters in Qdrant...")
+                    video = await reload_video()
                     await embed_and_store_chunks(db, video.id, chapter_chunks, chunk_type="chapter")
 
+                video = await reload_video()
                 analysis = await generate_and_store_summary(db, video.id, full_transcript)
                 await db.commit()  # flush so analysis.summary is readable
                 
                 # 6b. Index the summary in Qdrant so it's searchable
                 if analysis and analysis.summary:
                     print("Indexing summary chunk in Qdrant...")
+                    video = await reload_video()
                     await embed_and_store_single_chunk(
                         db,
                         video.id,
@@ -224,19 +231,34 @@ async def async_process_video(video_id_str: str):
                         chunk_type="summary",
                     )
                 
+                video = await reload_video()
                 await generate_and_store_flashcards(db, video.id, full_transcript)
+                
+                video = await reload_video()
                 await generate_and_store_quiz(db, video.id, full_transcript)
                 
                 # 7. Complete
+                video = await reload_video()
                 video.status = "COMPLETED"
                 await db.commit()
                 print(f"Successfully processed video {video_id_str}")
                 
         except Exception as e:
             print(f"Error processing video {video_id_str}: {e}")
-            video.status = "FAILED"
-            await db.commit()
+            if "was deleted from database" in str(e):
+                print(f"Video {video_id_str} was deleted during processing. Gracefully aborting Celery task.")
+                return
+            try:
+                # Check if video still exists before trying to update status
+                res = await db.execute(select(Video).where(Video.id == video_id_str))
+                video_exists = res.scalars().first()
+                if video_exists:
+                    video_exists.status = "FAILED"
+                    await db.commit()
+            except Exception as commit_err:
+                print(f"Failed to set status to FAILED: {commit_err}")
             raise
+
 
 @celery_app.task(name="process_video")
 def process_video_task(video_id_str: str):

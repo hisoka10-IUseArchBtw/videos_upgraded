@@ -1,18 +1,23 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16
     container_name: vue_postgres
+    env_file:
+      - backend/core/.env
     environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=video_engine
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -23,6 +28,11 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "echo > /dev/tcp/localhost/6333" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
@@ -36,13 +46,16 @@ services:
   minio:
     image: minio/minio:RELEASE.2024-03-30T09-41-56Z
     container_name: vue_minio
+    command: server /data --console-address ":9001"
+    env_file:
+      - backend/core/.env
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
     ports:
       - "9000:9000"
       - "9001:9001"
-    environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
-    command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
     restart: unless-stopped
@@ -53,7 +66,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -65,20 +78,26 @@ services:
     container_name: vue_api
     ports:
       - "8000:8000"
+    env_file:
+      - backend/core/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/video_engine
-      - REDIS_URL=redis://redis:6379/0
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - MINIO_SECURE=false
-      - QDRANT_URL=http://qdrant:6333
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_EXTERNAL_ENDPOINT: localhost:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_SECURE: "false"
+      QDRANT_URL: http://qdrant:6333
     depends_on:
-      - postgres
-      - redis
-      - minio
-      - qdrant
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      qdrant:
+        condition: service_healthy
     restart: unless-stopped
 
   worker:
@@ -86,21 +105,27 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: vue_worker
-    command: ["celery", "-A", "backend.core.celery_app", "worker", "--loglevel=info"]
+    command: celery -A backend.workers.video_worker worker --loglevel=info --concurrency=2
+    env_file:
+      - backend/core/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://user:password@postgres:5432/video_engine
-      - REDIS_URL=redis://redis:6379/0
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - MINIO_SECURE=false
-      - QDRANT_URL=http://qdrant:6333
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_EXTERNAL_ENDPOINT: localhost:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_SECURE: "false"
+      QDRANT_URL: http://qdrant:6333
     depends_on:
-      - postgres
-      - redis
-      - minio
-      - qdrant
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+      qdrant:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

@@ -4,8 +4,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from google import genai
-from google.genai import types
+from fastembed import TextEmbedding
 from qdrant_client.models import Filter, FieldCondition, MatchAny, MatchValue
 
 from backend.ai.metrics import (
@@ -16,9 +15,15 @@ from backend.ai.metrics import (
 from backend.search.qdrant_client import get_qdrant_client, QDRANT_COLLECTION_NAME
 
 # ---------------------------------------------------------------------------
-# Gemini client for query embedding
+# Local FastEmbed embedding client
 # ---------------------------------------------------------------------------
-_gemini = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+_model = None
+
+def _get_embedding_model():
+    global _model
+    if _model is None:
+        _model = TextEmbedding(model_name="nomic-ai/nomic-embed-text-v1.5")
+    return _model
 
 
 # ---------------------------------------------------------------------------
@@ -41,32 +46,26 @@ class SearchResult:
 # ---------------------------------------------------------------------------
 async def _embed_query(query: str) -> List[float]:
     """
-    Embeds a search query using Gemini text-embedding-004.
-
-    Uses RETRIEVAL_QUERY task type (distinct from RETRIEVAL_DOCUMENT used
-    when indexing) as recommended by the Gemini embedding docs.
+    Embeds a search query using Local FastEmbed nomic-embed-text-v1.5.
     """
     start = time.time()
-    result = await _gemini.aio.models.embed_content(
-        model="text-embedding-004",
-        contents=query,
-        config=types.EmbedContentConfig(task_type="RETRIEVAL_QUERY"),
-    )
+    model = _get_embedding_model()
+    embeddings = list(model.embed([query]))
     duration = time.time() - start
 
     AI_REQUEST_LATENCY_SECONDS.labels(
-        model="text-embedding-004", operation="embed_query"
+        model="nomic-embed-text-v1.5", operation="embed_query"
     ).observe(duration)
 
     estimated_tokens = len(query) // 4
     AI_TOKEN_USAGE_TOTAL.labels(
-        model="text-embedding-004", operation="embed_query", token_type="total"
+        model="nomic-embed-text-v1.5", operation="embed_query", token_type="total"
     ).inc(estimated_tokens)
     AI_API_COST_TOTAL.labels(
-        model="text-embedding-004", operation="embed_query"
-    ).inc((estimated_tokens / 1_000_000) * 0.02)
+        model="nomic-embed-text-v1.5", operation="embed_query"
+    ).inc(0.0)
 
-    return result.embeddings[0].values
+    return [float(x) for x in embeddings[0]]
 
 
 # ---------------------------------------------------------------------------

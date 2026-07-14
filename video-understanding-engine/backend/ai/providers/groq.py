@@ -1,17 +1,16 @@
 import os
 import json
 import time
-from google import genai
-from google.genai import types
+from groq import AsyncGroq
 from typing import Union, Dict, List, Any
 
 from backend.ai.providers.base import AIProvider, safe_format
 from backend.ai.metrics import AI_TOKEN_USAGE_TOTAL, AI_API_COST_TOTAL, AI_REQUEST_LATENCY_SECONDS
 
-class GeminiProvider(AIProvider):
-    def __init__(self, model_name: str = "gemini-2.0-flash"):
-        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        self.model_name = model_name
+class GroqProvider(AIProvider):
+    def __init__(self, model_name: str = None):
+        self.client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
+        self.model_name = model_name or os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
     async def generate_json(self, prompt_template: str, **kwargs) -> Union[Dict[str, Any], List[Any]]:
         # Format the prompt using kwargs
@@ -19,34 +18,38 @@ class GeminiProvider(AIProvider):
         
         start_time = time.time()
         
-        response = await self.client.aio.models.generate_content(
+        response = await self.client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
             model=self.model_name,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-            )
+            response_format={"type": "json_object"},
         )
         
         duration = time.time() - start_time
         AI_REQUEST_LATENCY_SECONDS.labels(model=self.model_name, operation="generate_json").observe(duration)
         
         # Track Usage & Estimate Cost
-        if hasattr(response, "usage_metadata") and response.usage_metadata:
-            prompt_tokens = response.usage_metadata.prompt_token_count
-            completion_tokens = response.usage_metadata.candidates_token_count
+        # Llama 3 70B pricing estimation (input: $0.59/1M tokens, output: $0.79/1M tokens)
+        if hasattr(response, "usage") and response.usage:
+            prompt_tokens = response.usage.prompt_tokens
+            completion_tokens = response.usage.completion_tokens
             
             # Increment Token Counters
             AI_TOKEN_USAGE_TOTAL.labels(model=self.model_name, operation="generate_json", token_type="prompt").inc(prompt_tokens)
             AI_TOKEN_USAGE_TOTAL.labels(model=self.model_name, operation="generate_json", token_type="completion").inc(completion_tokens)
             
-            # Estimate cost (Gemini 1.5 Flash: ~$0.075/1M input, ~$0.30/1M output as of 2024)
-            cost = (prompt_tokens / 1_000_000 * 0.075) + (completion_tokens / 1_000_000 * 0.3)
+            cost = (prompt_tokens / 1_000_000 * 0.59) + (completion_tokens / 1_000_000 * 0.79)
             AI_API_COST_TOTAL.labels(model=self.model_name, operation="generate_json").inc(cost)
             
+        content = response.choices[0].message.content
         try:
-            return json.loads(response.text)
+            return json.loads(content)
         except json.JSONDecodeError:
-            # Fallback if the model failed to return perfect JSON despite mime_type
+            # Fallback if the model failed to return perfect JSON despite response_format
             import re
-            cleaned_text = re.sub(r'```json\n?|```', '', response.text).strip()
+            cleaned_text = re.sub(r'```json\n?|```', '', content).strip()
             return json.loads(cleaned_text)

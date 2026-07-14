@@ -1,10 +1,16 @@
 import os
 import time
 import uuid
+import logging
+import warnings
 from typing import List, Optional
 
-from google import genai
-from google.genai import types
+# Suppress Hugging Face Hub download warnings and telemetry logs
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", message=".*unauthenticated requests to the HF Hub.*")
+warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
+
+from fastembed import TextEmbedding
 from qdrant_client.models import PointStruct
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,9 +23,16 @@ from backend.ai.metrics import (
 )
 
 # ---------------------------------------------------------------------------
-# Gemini embedding client
+# Local FastEmbed embedding client
 # ---------------------------------------------------------------------------
-_gemini = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+_model = None
+
+def _get_embedding_model():
+    global _model
+    if _model is None:
+        # nomic-ai/nomic-embed-text-v1.5 has 768 dimensions
+        _model = TextEmbedding(model_name="nomic-ai/nomic-embed-text-v1.5")
+    return _model
 
 
 # ---------------------------------------------------------------------------
@@ -27,26 +40,22 @@ _gemini = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 # ---------------------------------------------------------------------------
 async def _embed_text(text: str) -> List[float]:
     start = time.time()
-    result = await _gemini.aio.models.embed_content(
-        model="text-embedding-004",
-        contents=text,
-        config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
-    )
+    model = _get_embedding_model()
+    # model.embed returns a generator of numpy arrays
+    embeddings = list(model.embed([text]))
     duration = time.time() - start
 
     AI_REQUEST_LATENCY_SECONDS.labels(
-        model="text-embedding-004", operation="embed"
+        model="nomic-embed-text-v1.5", operation="embed"
     ).observe(duration)
 
     estimated_tokens = len(text) // 4
     AI_TOKEN_USAGE_TOTAL.labels(
-        model="text-embedding-004", operation="embed", token_type="total"
+        model="nomic-embed-text-v1.5", operation="embed", token_type="total"
     ).inc(estimated_tokens)
-    AI_API_COST_TOTAL.labels(model="text-embedding-004", operation="embed").inc(
-        (estimated_tokens / 1_000_000) * 0.02
-    )
+    AI_API_COST_TOTAL.labels(model="nomic-embed-text-v1.5", operation="embed").inc(0.0)
 
-    return result.embeddings[0].values
+    return [float(x) for x in embeddings[0]]
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +98,9 @@ async def embed_and_store_chunks(
         vector = await _embed_text(text)
 
         # --- SQL record (relational anchor, no embedding stored here) ---
+        chunk_id = uuid.uuid4()
         db_chunk = VideoChunk(
+            id=chunk_id,
             video_id=video_id,
             chunk_index=i,
             text=text,
@@ -102,14 +113,13 @@ async def embed_and_store_chunks(
         db_chunks.append(db_chunk)
 
         # --- Qdrant point (vector + full payload for retrieval) ---
-        # Use the Python UUID directly — Qdrant accepts UUID point IDs natively.
         qdrant_points.append(
             PointStruct(
-                id=str(db_chunk.id),
+                id=str(chunk_id),
                 vector=vector,
                 payload={
                     "video_id": str(video_id),
-                    "chunk_id": str(db_chunk.id),
+                    "chunk_id": str(chunk_id),
                     "chunk_index": i,
                     "text": text,
                     "chunk_type": chunk_type,

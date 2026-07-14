@@ -7,7 +7,7 @@ from pwdlib.hashers.argon2 import Argon2Hasher
 
 from backend.core.database import get_db
 from backend.models.User.user_model import User
-from backend.auth.jwt import create_access_token
+from backend.auth.jwt import create_access_token, get_current_user
 
 router = APIRouter(tags=["Authentication"])
 password_hash = PasswordHash((Argon2Hasher(),))
@@ -26,3 +26,12 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
 
     access_token = create_access_token(data={"sub": str(user.user_id)})
     return {"access_token": access_token, "token_type": "bearer"}
+
+@router.get('/users/me')
+async def get_me(current_user: User = Depends(get_current_user)):
+    return {
+        "user_id": str(current_user.user_id),
+        "username": current_user.username,
+        "email": current_user.email,
+        "is_admin": getattr(current_user, "is_admin", False)
+    }

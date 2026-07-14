@@ -1,6 +1,7 @@
 from typing import List
 import uuid
 import hashlib
+import asyncio
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -10,9 +11,11 @@ from backend.models.User.user_model import User
 from backend.models.Video.video_model import Video
 from backend.models.Video.video_schema import VideoResponse
 from backend.auth.jwt import get_current_user
-from backend.services.storage import upload_video_file
+from backend.services.storage import upload_video_file, get_video_url, delete_video_assets
 from backend.workers.video_worker import process_video_task
 from backend.services.video_recycler import recycle_video
+from backend.search.qdrant_client import get_qdrant_client, QDRANT_COLLECTION_NAME
+from qdrant_client.models import Filter, FieldCondition, MatchValue
 
 router = APIRouter(tags=["Video"], prefix="/video")
 
@@ -113,3 +116,66 @@ async def get_video(
         raise HTTPException(status_code=404, detail="Video not found")
     
     return video
+
+@router.get('/{video_id}/url')
+async def get_video_presigned_url(
+    video_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(Video).where(Video.id == video_id, Video.user_id == current_user.user_id)
+    )
+    video = result.scalars().first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    
+    url = get_video_url(video.filename)
+    return {"url": url}
+
+@router.delete('/{video_id}', status_code=status.HTTP_200_OK)
+async def delete_video(
+    video_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    # 1. Fetch video record and verify ownership
+    result = await db.execute(
+        select(Video).where(Video.id == video_id, Video.user_id == current_user.user_id)
+    )
+    video = result.scalars().first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    # 2. Check if other videos reference the same filename (due to deduplication)
+    same_file_count_result = await db.execute(
+        select(Video).where(Video.filename == video.filename, Video.id != video.id)
+    )
+    other_references = same_file_count_result.first()
+    other_references_exist = other_references is not None
+
+    # 3. Delete files from MinIO (video file if no other references, plus all frames)
+    await asyncio.to_thread(delete_video_assets, video.id, video.filename, other_references_exist)
+
+    # 4. Delete vector chunks from Qdrant
+    qdrant = get_qdrant_client()
+    try:
+        await qdrant.delete(
+            collection_name=QDRANT_COLLECTION_NAME,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(
+                        key="video_id",
+                        match=MatchValue(value=str(video_id))
+                    )
+                ]
+            )
+        )
+    except Exception as e:
+        print(f"Error deleting vectors from Qdrant: {e}")
+
+    # 5. Delete video row from SQL (cascade deletes related tables like video_chunks, chapters, etc.)
+    await db.delete(video)
+    await db.commit()
+
+    return {"message": "Video successfully deleted", "video_id": video_id}

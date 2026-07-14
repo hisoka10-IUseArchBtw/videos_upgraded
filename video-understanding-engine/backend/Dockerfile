@@ -14,6 +14,9 @@ WORKDIR /app
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Pre-download and cache the nomic-embed-text-v1.5 model to avoid network fetches at runtime
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='nomic-ai/nomic-embed-text-v1.5')"
+
 # Copy the backend code
 COPY backend/ ./backend/
 

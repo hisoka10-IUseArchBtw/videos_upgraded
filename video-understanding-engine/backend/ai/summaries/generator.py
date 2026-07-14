@@ -2,10 +2,10 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.AI.video_analysis import VideoAnalysis
 from backend.ai.prompts import SUMMARY_PROMPT
-from backend.ai.providers.gemini import GeminiProvider
+from backend.ai.providers import get_provider
 
 async def generate_and_store_summary(db: AsyncSession, video_id: uuid.UUID, transcript: str):
-    provider = GeminiProvider()
+    provider = get_provider()
     
     # Generate summary JSON
     result = await provider.generate_json(SUMMARY_PROMPT, transcript=transcript)

@@ -2,16 +2,14 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.models.AI.quiz_question import QuizQuestion
 from backend.ai.prompts import QUIZ_PROMPT
-from backend.ai.providers.gemini import GeminiProvider
+from backend.ai.providers import get_provider, ensure_list
 
 async def generate_and_store_quiz(db: AsyncSession, video_id: uuid.UUID, transcript: str):
-    provider = GeminiProvider()
+    provider = get_provider()
     
     # Generate quiz JSON array
-    results = await provider.generate_json(QUIZ_PROMPT, transcript=transcript)
-    
-    if not isinstance(results, list):
-        results = [results] # fallback
+    results_raw = await provider.generate_json(QUIZ_PROMPT, transcript=transcript)
+    results = ensure_list(results_raw)
         
     questions = []
     for item in results:

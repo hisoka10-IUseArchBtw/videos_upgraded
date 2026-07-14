@@ -1,5 +1,17 @@
 from abc import ABC, abstractmethod
 from typing import Union, Dict, List, Any
+import re
+
+def safe_format(template: str, **kwargs) -> str:
+    """
+    Safely formats a prompt template by replacing only the keys specified in kwargs.
+    This avoids KeyErrors when the template contains unescaped curly braces (e.g. JSON schemas).
+    """
+    result = template
+    for key, val in kwargs.items():
+        # Match exactly {key} and replace it with its value
+        result = re.sub(r'(?<!{)\{' + re.escape(key) + r'\}(?!})', str(val), result)
+    return result
 
 class AIProvider(ABC):
     """
