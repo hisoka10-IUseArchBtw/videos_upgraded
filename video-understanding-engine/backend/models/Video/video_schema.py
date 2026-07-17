@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 import uuid
 from datetime import datetime
+from typing import Optional
 
 class VideoResponse(BaseModel):
     id: uuid.UUID
@@ -12,3 +13,7 @@ class VideoResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class VideoWithThumbnail(VideoResponse):
+    thumbnail_url: Optional[str] = None
+    duration: Optional[float] = None

@@ -14,8 +14,13 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
+  
+  // Prevent browser caching
+  headers.set('Cache-Control', 'no-cache');
+  headers.set('Pragma', 'no-cache');
 
   const response = await fetch(`${BASE_URL}${endpoint}`, {
+    cache: 'no-store',
     ...options,
     headers,
   });

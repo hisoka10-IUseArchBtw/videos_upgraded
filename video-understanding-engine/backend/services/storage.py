@@ -116,6 +116,24 @@ def upload_local_file(local_path: str, object_name: str) -> bool:
         print(f"Error uploading local file to MinIO: {e}")
         return False
 
+def get_thumbnail_url(video_id: uuid.UUID, expires_in_days: int = 7) -> str | None:
+    """
+    Generates a presigned URL for the first extracted frame (thumbnail) of a video.
+    Returns None if the thumbnail doesn't exist yet.
+    """
+    object_name = f"frames/{video_id}/frame_0001.jpg"
+    try:
+        # Check if object exists before generating presigned URL
+        minio_client.stat_object(BUCKET_NAME, object_name)
+        url = presigned_client.presigned_get_object(
+            BUCKET_NAME,
+            object_name,
+            expires=timedelta(days=expires_in_days),
+        )
+        return url
+    except S3Error:
+        return None
+
 def delete_video_assets(video_id: uuid.UUID, filename: str, other_references_exist: bool) -> bool:
     """
     Deletes the original video file (if other_references_exist is False)

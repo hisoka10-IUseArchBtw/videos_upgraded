@@ -9,9 +9,9 @@ from sqlalchemy.future import select
 from backend.core.database import get_db
 from backend.models.User.user_model import User
 from backend.models.Video.video_model import Video
-from backend.models.Video.video_schema import VideoResponse
+from backend.models.Video.video_schema import VideoResponse, VideoWithThumbnail
 from backend.auth.jwt import get_current_user
-from backend.services.storage import upload_video_file, get_video_url, delete_video_assets
+from backend.services.storage import upload_video_file, get_video_url, delete_video_assets, get_thumbnail_url
 from backend.workers.video_worker import process_video_task
 from backend.services.video_recycler import recycle_video
 from backend.search.qdrant_client import get_qdrant_client, QDRANT_COLLECTION_NAME
@@ -93,16 +93,29 @@ async def upload_video(
 
     return new_video
 
-@router.get('/list', response_model=List[VideoResponse])
+@router.get('/list', response_model=List[VideoWithThumbnail])
 async def list_videos(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     result = await db.execute(select(Video).where(Video.user_id == current_user.user_id))
     videos = result.scalars().all()
-    return videos
+    out = []
+    for v in videos:
+        thumbnail_url = await asyncio.to_thread(get_thumbnail_url, v.id)
+        out.append(VideoWithThumbnail(
+            id=v.id,
+            user_id=v.user_id,
+            title=v.title,
+            filename=v.filename,
+            status=v.status,
+            created_at=v.created_at,
+            duration=v.duration,
+            thumbnail_url=thumbnail_url,
+        ))
+    return out
 
-@router.get('/{video_id}', response_model=VideoResponse)
+@router.get('/{video_id}', response_model=VideoWithThumbnail)
 async def get_video(
     video_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -115,7 +128,17 @@ async def get_video(
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
     
-    return video
+    thumbnail_url = await asyncio.to_thread(get_thumbnail_url, video.id)
+    return VideoWithThumbnail(
+        id=video.id,
+        user_id=video.user_id,
+        title=video.title,
+        filename=video.filename,
+        status=video.status,
+        created_at=video.created_at,
+        duration=video.duration,
+        thumbnail_url=thumbnail_url,
+    )
 
 @router.get('/{video_id}/url')
 async def get_video_presigned_url(

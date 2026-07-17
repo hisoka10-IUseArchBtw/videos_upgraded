@@ -10,6 +10,7 @@ interface Video {
   title: string;
   status: string;
   duration?: number;
+  thumbnail_url?: string | null;
   created_at: string;
 }
 
@@ -220,9 +221,21 @@ export default function Dashboard() {
                   <Link href={`/video/${video.id}`}>
                     <div className={`bg-card border border-border/60 rounded-3xl overflow-hidden hover:border-primary/50 hover:shadow-2xl hover:shadow-primary/10 transition-all duration-300 group cursor-pointer flex flex-col h-[280px] ${deletingId === video.id ? 'opacity-50 pointer-events-none' : ''}`}>
                       <div className="h-40 bg-zinc-900/80 relative flex items-center justify-center overflow-hidden">
-                        <svg className="w-12 h-12 text-zinc-800 group-hover:scale-110 group-hover:text-zinc-700 transition-all duration-500" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
+                        {video.thumbnail_url ? (
+                          <img
+                            src={video.thumbnail_url}
+                            alt={video.title}
+                            className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                            onError={(e) => {
+                              // Fallback to play icon on error
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <svg className="w-12 h-12 text-zinc-800 group-hover:scale-110 group-hover:text-zinc-700 transition-all duration-500" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z" />
+                          </svg>
+                        )}
                         <div className="absolute top-4 right-4 z-10 shadow-sm">
                           {getStatusBadge(video.status)}
                         </div>
