@@ -1,4 +1,4 @@
-const BASE_URL = "https://130-210-13-32.sslip.io/";
+const BASE_URL = "https://130-210-13-32.sslip.io";
 
 /**
  * A wrapper around the native fetch API to automatically inject JWT tokens
