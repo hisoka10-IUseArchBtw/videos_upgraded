@@ -16,6 +16,9 @@ from backend.workers.video_worker import process_video_task
 from backend.services.video_recycler import recycle_video
 from backend.search.qdrant_client import get_qdrant_client, QDRANT_COLLECTION_NAME
 from qdrant_client.models import Filter, FieldCondition, MatchValue
+import logging
+
+logger = logging.getLogger("video_engine")
 
 router = APIRouter(tags=["Video"], prefix="/video")
 
@@ -25,7 +28,9 @@ async def upload_video(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    logger.info(f"Video upload requested: {file.filename} by user {current_user.user_id}")
     if not file.content_type.startswith('video/'):
+        logger.warning(f"Rejected non-video upload: {file.filename} (content-type: {file.content_type})")
         raise HTTPException(status_code=400, detail="File provided is not a video")
 
     # Read the file content to compute SHA-256
@@ -41,6 +46,7 @@ async def upload_video(
     existing_video = existing_video_result.scalars().first()
 
     if existing_video:
+        logger.info(f"Deduplication triggered for {file.filename}. Sharing storage object with existing video ID {existing_video.id}")
         # Deduplicate
         new_video = Video(
             user_id=current_user.user_id,
@@ -76,6 +82,7 @@ async def upload_video(
 
     try:
         # Upload file to storage (MinIO)
+        logger.info(f"Uploading file {file.filename} to MinIO storage...")
         object_name = await upload_video_file(file, current_user.user_id, new_video.id)
         
         # We can update the filename to the MinIO object name if we want
@@ -83,12 +90,14 @@ async def upload_video(
         await db.commit()
         await db.refresh(new_video)
     except Exception as e:
+        logger.error(f"Failed to upload video {file.filename} to storage: {e}")
         # If upload fails, we might want to mark the video as FAILED
         new_video.status = "FAILED"
         await db.commit()
         raise HTTPException(status_code=500, detail="Failed to upload video to storage")
 
     # Enqueue Celery Task
+    logger.info(f"Enqueueing Celery processing task for video ID {new_video.id}")
     process_video_task.delay(str(new_video.id))
 
     return new_video
@@ -162,12 +171,14 @@ async def delete_video(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    logger.info(f"Video delete requested for ID {video_id} by user {current_user.user_id}")
     # 1. Fetch video record and verify ownership
     result = await db.execute(
         select(Video).where(Video.id == video_id, Video.user_id == current_user.user_id)
     )
     video = result.scalars().first()
     if not video:
+        logger.warning(f"Video delete failed: ID {video_id} not found or not owned by user {current_user.user_id}")
         raise HTTPException(status_code=404, detail="Video not found")
 
     # 2. Check if other videos reference the same filename (due to deduplication)
@@ -178,9 +189,11 @@ async def delete_video(
     other_references_exist = other_references is not None
 
     # 3. Delete files from MinIO (video file if no other references, plus all frames)
+    logger.info(f"Deleting files from MinIO for video {video_id}...")
     await asyncio.to_thread(delete_video_assets, video.id, video.filename, other_references_exist)
 
     # 4. Delete vector chunks from Qdrant
+    logger.info(f"Deleting vector points from Qdrant for video {video_id}...")
     qdrant = get_qdrant_client()
     try:
         await qdrant.delete(
@@ -195,10 +208,12 @@ async def delete_video(
             )
         )
     except Exception as e:
-        print(f"Error deleting vectors from Qdrant: {e}")
+        logger.error(f"Error deleting vectors from Qdrant: {e}")
 
     # 5. Delete video row from SQL (cascade deletes related tables like video_chunks, chapters, etc.)
+    logger.info(f"Deleting database records for video {video_id}...")
     await db.delete(video)
     await db.commit()
 
+    logger.info(f"Successfully deleted video {video_id}")
     return {"message": "Video successfully deleted", "video_id": video_id}

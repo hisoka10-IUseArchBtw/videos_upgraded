@@ -5,6 +5,8 @@ import tempfile
 import ffmpeg
 from typing import List, Dict
 
+from celery.utils.log import get_task_logger
+
 from backend.core.celery_app import celery_app
 from backend.core.database import AsyncSessionLocal
 from backend.models.Video.video_model import Video
@@ -19,6 +21,8 @@ from backend.ai.flashcards.generator import generate_and_store_flashcards
 from backend.ai.quiz.generator import generate_and_store_quiz
 from backend.ai.metrics import AI_REQUEST_LATENCY_SECONDS
 
+logger = get_task_logger(__name__)
+
 def extract_audio(video_path: str, audio_path: str):
     """Uses ffmpeg to extract audio to a wav/mp3 file."""
     try:
@@ -30,7 +34,7 @@ def extract_audio(video_path: str, audio_path: str):
             .run(quiet=True)
         )
     except ffmpeg.Error as e:
-        print(f"FFmpeg error: {e.stderr.decode() if e.stderr else e}")
+        logger.error(f"FFmpeg error: {e.stderr.decode() if e.stderr else e}")
         raise e
 
 def extract_metadata(video_path: str) -> dict:
@@ -54,7 +58,7 @@ def extract_metadata(video_path: str) -> dict:
             "codec": codec
         }
     except Exception as e:
-        print(f"Error extracting metadata: {e}")
+        logger.error(f"Error extracting metadata: {e}")
         return {}
 
 def extract_scene_keyframes(video_path: str, output_dir: str) -> list:
@@ -75,13 +79,13 @@ def extract_scene_keyframes(video_path: str, output_dir: str) -> list:
                 frames.append(os.path.join(output_dir, filename))
         return frames
     except ffmpeg.Error as e:
-        print(f"FFmpeg error during frame extraction: {e.stderr.decode() if e.stderr else e}")
+        logger.error(f"FFmpeg error during frame extraction: {e.stderr.decode() if e.stderr else e}")
         return []
 
 
 def transcribe_audio_with_groq(audio_path: str) -> List[Dict]:
     """Transcribes audio using Groq Whisper model and parses segments to match format."""
-    print(f"Fallback: Transcribing {audio_path} using Groq Whisper...")
+    logger.info(f"Fallback: Transcribing {audio_path} using Groq Whisper...")
     from groq import Groq
     groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
     
@@ -136,7 +140,7 @@ async def async_process_video(video_id_str: str):
             # 1. Fetch video record
             video = await reload_video()
         except ValueError as val_err:
-            print(val_err)
+            logger.warning(str(val_err))
             return
 
         try:
@@ -148,13 +152,13 @@ async def async_process_video(video_id_str: str):
                 audio_file_path = os.path.join(temp_dir, f"audio_{video_id_str}.mp3")
                 
                 # 2. Download from MinIO
-                print("Downloading video from MinIO...")
+                logger.info("Downloading video from MinIO...")
                 success = await asyncio.to_thread(download_video_file, video.filename, video_file_path)
                 if not success:
                     raise Exception("Failed to download video from MinIO")
                 
                 # 2.5 Extract Video Metadata
-                print("Extracting metadata...")
+                logger.info("Extracting metadata...")
                 metadata = await asyncio.to_thread(extract_metadata, video_file_path)
                 if metadata:
                     video = await reload_video()
@@ -165,22 +169,22 @@ async def async_process_video(video_id_str: str):
                     await db.commit()
                 
                 # 3. Extract Audio
-                print("Extracting audio...")
+                logger.info("Extracting audio...")
                 await asyncio.to_thread(extract_audio, video_file_path, audio_file_path)
                 
                 # 4. Transcribe Audio
-                print("Transcribing audio with fallback mechanism...")
+                logger.info("Transcribing audio with fallback mechanism...")
                 transcript_chunks = await asyncio.to_thread(transcribe_audio_with_fallback, audio_file_path)
                 
                 full_transcript = " ".join([chunk.get("text", "") for chunk in transcript_chunks])
                 
                 # 5. Embeddings — index transcript chunks in Qdrant
-                print("Generating and storing vector embeddings (transcript)...")
+                logger.info("Generating and storing vector embeddings (transcript)...")
                 video = await reload_video()
                 await embed_and_store_chunks(db, video.id, transcript_chunks, chunk_type="transcript")
                 
                 # 5.5 Vision Intelligence (Frames & OCR)
-                print("Extracting frames...")
+                logger.info("Extracting frames...")
                 frames_dir = os.path.join(temp_dir, "frames")
                 os.makedirs(frames_dir, exist_ok=True)
                 frame_paths = await asyncio.to_thread(extract_scene_keyframes, video_file_path, frames_dir)
@@ -192,15 +196,15 @@ async def async_process_video(video_id_str: str):
                     object_name = f"frames/{video.id}/{filename}"
                     await asyncio.to_thread(upload_local_file, frame_path, object_name)
                     
-                print("Running OCR on extracted frames...")
+                logger.info("Running OCR on extracted frames...")
                 ocr_results = await asyncio.to_thread(process_frames_for_ocr, frame_paths)
                 if ocr_results:
-                    print("Indexing OCR chunks in Qdrant...")
+                    logger.info("Indexing OCR chunks in Qdrant...")
                     video = await reload_video()
                     await embed_and_store_chunks(db, video.id, ocr_results, chunk_type="ocr")
                 
                 # 6. Generate AI Outputs sequentially to prevent AsyncSession concurrency issues
-                print("Generating Chapters, Summaries, Flashcards, and Quiz...")
+                logger.info("Generating Chapters, Summaries, Flashcards, and Quiz...")
                 
                 video = await reload_video()
                 chapters = await generate_and_store_chapters(db, video.id, transcript_chunks)
@@ -212,7 +216,7 @@ async def async_process_video(video_id_str: str):
                             "start_time": ch.start_time,
                             "end_time": ch.end_time
                         })
-                    print("Indexing chapters in Qdrant...")
+                    logger.info("Indexing chapters in Qdrant...")
                     video = await reload_video()
                     await embed_and_store_chunks(db, video.id, chapter_chunks, chunk_type="chapter")
 
@@ -222,7 +226,7 @@ async def async_process_video(video_id_str: str):
                 
                 # 6b. Index the summary in Qdrant so it's searchable
                 if analysis and analysis.summary:
-                    print("Indexing summary chunk in Qdrant...")
+                    logger.info("Indexing summary chunk in Qdrant...")
                     video = await reload_video()
                     await embed_and_store_single_chunk(
                         db,
@@ -241,12 +245,12 @@ async def async_process_video(video_id_str: str):
                 video = await reload_video()
                 video.status = "COMPLETED"
                 await db.commit()
-                print(f"Successfully processed video {video_id_str}")
+                logger.info(f"Successfully processed video {video_id_str}")
                 
         except Exception as e:
-            print(f"Error processing video {video_id_str}: {e}")
+            logger.error(f"Error processing video {video_id_str}: {e}")
             if "was deleted from database" in str(e):
-                print(f"Video {video_id_str} was deleted during processing. Gracefully aborting Celery task.")
+                logger.warning(f"Video {video_id_str} was deleted during processing. Gracefully aborting Celery task.")
                 return
             try:
                 # Check if video still exists before trying to update status
@@ -256,7 +260,7 @@ async def async_process_video(video_id_str: str):
                     video_exists.status = "FAILED"
                     await db.commit()
             except Exception as commit_err:
-                print(f"Failed to set status to FAILED: {commit_err}")
+                logger.error(f"Failed to set status to FAILED: {commit_err}")
             raise
 
 

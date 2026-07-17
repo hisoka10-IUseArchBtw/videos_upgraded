@@ -19,11 +19,16 @@ from .search import router as search_router
 from .search.qdrant_client import ensure_collection
 
 from prometheus_fastapi_instrumentator import Instrumentator
+from .core.logging_config import setup_logging
+import logging
+
+setup_logging()
+logger = logging.getLogger("video_engine")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Starting up")
+    logger.info("Starting up")
 
     # Create / migrate PostgreSQL tables
     async with engine.begin() as conn:
@@ -33,7 +38,7 @@ async def lifespan(app: FastAPI):
     await ensure_collection()
 
     yield
-    print("Shutting down")
+    logger.info("Shutting down")
 
 
 app = FastAPI(

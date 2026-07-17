@@ -1,9 +1,12 @@
 import os
 import uuid
+import logging
 from minio import Minio
 from minio.error import S3Error
 from fastapi import UploadFile
 from datetime import timedelta
+
+logger = logging.getLogger("video_engine")
 
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
 MINIO_EXTERNAL_ENDPOINT = os.getenv("MINIO_EXTERNAL_ENDPOINT", MINIO_ENDPOINT)
@@ -35,8 +38,9 @@ def ensure_bucket_exists():
     try:
         if not minio_client.bucket_exists(BUCKET_NAME):
             minio_client.make_bucket(BUCKET_NAME)
+            logger.info(f"Created MinIO bucket: '{BUCKET_NAME}'")
     except S3Error as e:
-        print(f"Error checking/creating bucket: {e}")
+        logger.error(f"Error checking/creating bucket: {e}")
 
 async def upload_video_file(file: UploadFile, user_id: uuid.UUID, video_id: uuid.UUID) -> str:
     """
@@ -55,6 +59,7 @@ async def upload_video_file(file: UploadFile, user_id: uuid.UUID, video_id: uuid
     file.file.seek(0)
 
     try:
+        logger.info(f"Uploading file {object_name} ({file_size} bytes) to MinIO...")
         minio_client.put_object(
             BUCKET_NAME,
             object_name,
@@ -62,9 +67,10 @@ async def upload_video_file(file: UploadFile, user_id: uuid.UUID, video_id: uuid
             length=file_size,
             content_type=file.content_type
         )
+        logger.info(f"Successfully uploaded {object_name} to MinIO")
         return object_name
     except S3Error as e:
-        print(f"Error uploading to MinIO: {e}")
+        logger.error(f"Error uploading to MinIO: {e}")
         raise e
 
 def get_video_url(object_name: str, expires_in_days: int = 7) -> str:
@@ -79,7 +85,7 @@ def get_video_url(object_name: str, expires_in_days: int = 7) -> str:
         )
         return url
     except S3Error as e:
-        print(f"Error generating presigned URL: {e}")
+        logger.error(f"Error generating presigned URL for {object_name}: {e}")
         return ""
 
 def delete_video_file(object_name: str) -> bool:
@@ -88,9 +94,10 @@ def delete_video_file(object_name: str) -> bool:
     """
     try:
         minio_client.remove_object(BUCKET_NAME, object_name)
+        logger.info(f"Deleted {object_name} from MinIO")
         return True
     except S3Error as e:
-        print(f"Error deleting from MinIO: {e}")
+        logger.error(f"Error deleting {object_name} from MinIO: {e}")
         return False
 
 def download_video_file(object_name: str, file_path: str) -> bool:
@@ -98,10 +105,12 @@ def download_video_file(object_name: str, file_path: str) -> bool:
     Downloads a video file from MinIO to the specified local path.
     """
     try:
+        logger.info(f"Downloading {object_name} from MinIO to {file_path}...")
         minio_client.fget_object(BUCKET_NAME, object_name, file_path)
+        logger.info(f"Successfully downloaded {object_name} to {file_path}")
         return True
     except S3Error as e:
-        print(f"Error downloading from MinIO: {e}")
+        logger.error(f"Error downloading {object_name} from MinIO: {e}")
         return False
 
 def upload_local_file(local_path: str, object_name: str) -> bool:
@@ -110,10 +119,12 @@ def upload_local_file(local_path: str, object_name: str) -> bool:
     """
     ensure_bucket_exists()
     try:
+        logger.info(f"Uploading local file {local_path} to MinIO as {object_name}...")
         minio_client.fput_object(BUCKET_NAME, object_name, local_path)
+        logger.info(f"Successfully uploaded {object_name} to MinIO")
         return True
     except S3Error as e:
-        print(f"Error uploading local file to MinIO: {e}")
+        logger.error(f"Error uploading local file {local_path} to MinIO: {e}")
         return False
 
 def get_thumbnail_url(video_id: uuid.UUID, expires_in_days: int = 7) -> str | None:
@@ -145,9 +156,9 @@ def delete_video_assets(video_id: uuid.UUID, filename: str, other_references_exi
     if not other_references_exist:
         try:
             minio_client.remove_object(BUCKET_NAME, filename)
-            print(f"Deleted video file {filename} from MinIO")
+            logger.info(f"Deleted video file {filename} from MinIO")
         except S3Error as e:
-            print(f"Error deleting video file from MinIO: {e}")
+            logger.error(f"Error deleting video file from MinIO: {e}")
             success = False
 
     # 2. Delete all frames associated with this video ID
@@ -156,9 +167,9 @@ def delete_video_assets(video_id: uuid.UUID, filename: str, other_references_exi
         objects = minio_client.list_objects(BUCKET_NAME, prefix=prefix, recursive=True)
         for obj in objects:
             minio_client.remove_object(BUCKET_NAME, obj.object_name)
-        print(f"Deleted frames with prefix {prefix} from MinIO")
+        logger.info(f"Deleted frames with prefix {prefix} from MinIO")
     except S3Error as e:
-        print(f"Error deleting frames from MinIO: {e}")
+        logger.error(f"Error deleting frames from MinIO: {e}")
         success = False
         
     return success
