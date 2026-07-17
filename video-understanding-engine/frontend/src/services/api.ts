@@ -1,4 +1,4 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const BASE_URL = "https://130-210-13-32.sslip.io/";
 
 /**
  * A wrapper around the native fetch API to automatically inject JWT tokens
@@ -6,7 +6,7 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
  */
 export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-  
+
   const headers = new Headers(options.headers || {});
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
@@ -25,8 +25,8 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}) {
     try {
       const errorData = await response.json();
       // FastAPI usually puts the error string in `detail`
-      errorMessage = typeof errorData.detail === 'string' 
-        ? errorData.detail 
+      errorMessage = typeof errorData.detail === 'string'
+        ? errorData.detail
         : JSON.stringify(errorData.detail) || errorMessage;
     } catch {
       // Ignore JSON parse error if it's not JSON
@@ -36,6 +36,6 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}) {
 
   // Handle empty responses
   if (response.status === 204) return null;
-  
+
   return response.json();
 }

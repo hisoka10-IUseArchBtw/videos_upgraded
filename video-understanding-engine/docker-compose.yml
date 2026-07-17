@@ -71,6 +71,23 @@ services:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:latest
+    container_name: vue_grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/vue_dashboard.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/monitoring/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -128,8 +145,21 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+    depends_on:
+      - api
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
   qdrant_data:
+  grafana_data:
