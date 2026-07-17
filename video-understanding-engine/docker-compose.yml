@@ -52,10 +52,9 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_API_CORS_ALLOW_ORIGIN: "*"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+      MINIO_API_CORS_ALLOW_ORIGIN: "https://videos-upgraded.vercel.app"
+    # Ports NOT exposed publicly - accessed only via Caddy proxy
+    # MinIO console still accessible internally; add a Caddy route if needed
     volumes:
       - minio_data:/data
     restart: unless-stopped
@@ -101,7 +100,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: minio:9000
-      MINIO_EXTERNAL_ENDPOINT: localhost:9000
+      MINIO_EXTERNAL_ENDPOINT: ${MINIO_EXTERNAL_ENDPOINT:-130-210-13-32.sslip.io}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_SECURE: "false"
@@ -129,7 +128,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: minio:9000
-      MINIO_EXTERNAL_ENDPOINT: localhost:9000
+      MINIO_EXTERNAL_ENDPOINT: ${MINIO_EXTERNAL_ENDPOINT:-130-210-13-32.sslip.io}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_SECURE: "false"
@@ -163,3 +162,4 @@ volumes:
   minio_data:
   qdrant_data:
   grafana_data:
+  caddy_data:

@@ -10,6 +10,8 @@ MINIO_EXTERNAL_ENDPOINT = os.getenv("MINIO_EXTERNAL_ENDPOINT", MINIO_ENDPOINT)
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
 MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
+# Presigned URLs go through Caddy (HTTPS), so external client uses TLS=true by default
+MINIO_EXTERNAL_SECURE = os.getenv("MINIO_EXTERNAL_SECURE", "true").lower() == "true"
 MINIO_REGION = os.getenv("MINIO_REGION", "us-east-1")
 BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "videos")
 
@@ -25,7 +27,7 @@ presigned_client = Minio(
     MINIO_EXTERNAL_ENDPOINT,
     access_key=MINIO_ACCESS_KEY,
     secret_key=MINIO_SECRET_KEY,
-    secure=MINIO_SECURE,
+    secure=MINIO_EXTERNAL_SECURE,
     region=MINIO_REGION
 )
 

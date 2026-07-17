@@ -1,0 +1,17 @@
+130-210-13-32.sslip.io {
+    # Proxy API
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+
+    # Proxy MinIO bucket objects (presigned URL path: /videos/<object>?...)
+    # MinIO presigned URLs are: https://<host>/<bucket>/<object>?X-Amz-...
+    handle /videos/* {
+        reverse_proxy minio:9000
+    }
+
+    # Proxy everything else to the API backend
+    handle {
+        reverse_proxy api:8000
+    }
+}
