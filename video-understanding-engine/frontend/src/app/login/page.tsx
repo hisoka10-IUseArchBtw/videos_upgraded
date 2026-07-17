@@ -30,8 +30,8 @@ export default function LoginPage() {
       if (data.access_token) {
         await login(data.access_token);
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to login");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to login");
     } finally {
       setLoading(false);
     }
@@ -81,7 +81,7 @@ export default function LoginPage() {
           </button>
         </form>
         <p className="mt-8 text-center text-sm text-muted-foreground">
-          Don't have an account?{" "}
+          Don&apos;t have an account?{" "}
           <Link href="/signup" className="text-primary font-medium hover:underline underline-offset-4">
             Create one
           </Link>

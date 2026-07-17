@@ -3,9 +3,17 @@ import { useState, useEffect, useRef } from "react";
 import { fetchApi } from "@/services/api";
 import { useRouter } from "next/navigation";
 
+interface SearchResult {
+  video_id: string;
+  start_time: number;
+  chunk_type: string;
+  text: string;
+  metadata?: { chapter_title?: string };
+}
+
 export function GlobalSearch() {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -63,7 +71,7 @@ export function GlobalSearch() {
       {open && query.length > 2 && (
         <div className="absolute top-[calc(100%+8px)] w-full bg-card/95 backdrop-blur-xl border border-border/80 rounded-2xl shadow-2xl overflow-hidden z-50">
           {results.length === 0 && !loading ? (
-            <div className="p-6 text-center text-sm font-medium text-muted-foreground">No results found for "{query}"</div>
+            <div className="p-6 text-center text-sm font-medium text-muted-foreground">No results found for &ldquo;{query}&rdquo;</div>
           ) : (
             <div className="max-h-[60vh] overflow-y-auto custom-scrollbar">
               <div className="px-4 py-3 bg-secondary/30 border-b border-border/50">

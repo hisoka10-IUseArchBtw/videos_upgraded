@@ -1,6 +1,11 @@
 import { useState } from "react";
 
-export function FlashcardsViewer({ flashcards }: { flashcards: any[] }) {
+interface Flashcard {
+  question: string;
+  answer: string;
+}
+
+export function FlashcardsViewer({ flashcards }: { flashcards: Flashcard[] }) {
   const [idx, setIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
 

@@ -39,7 +39,7 @@ export function AiChat({ videoId, messages, setMessages, input, setInput }: AiCh
       });
       
       setMessages(prev => [...prev, { role: "assistant", content: data.answer }]);
-    } catch (err: any) {
+    } catch {
       setMessages(prev => [...prev, { role: "assistant", content: "Sorry, I encountered an error answering that." }]);
     } finally {
       loadingRef.current = false;

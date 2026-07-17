@@ -1,6 +1,12 @@
 import { useState } from "react";
 
-export function QuizInteractive({ questions }: { questions: any[] }) {
+interface QuizQuestion {
+  question: string;
+  options: string[];
+  correct_answer: string;
+}
+
+export function QuizInteractive({ questions }: { questions: QuizQuestion[] }) {
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [submitted, setSubmitted] = useState(false);
 

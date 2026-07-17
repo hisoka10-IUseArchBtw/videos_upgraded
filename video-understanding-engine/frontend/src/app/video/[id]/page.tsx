@@ -15,18 +15,48 @@ interface ChatMessage {
   content: string;
 }
 
+interface Chapter {
+  title: string;
+  start_time: number;
+  end_time: number;
+  summary?: string;
+}
+
+interface Flashcard {
+  question: string;
+  answer: string;
+}
+
+interface QuizQuestion {
+  question: string;
+  options: string[];
+  correct_answer: string;
+}
+
+interface VideoMeta {
+  title: string;
+  status: string;
+  created_at: string;
+  duration?: number;
+}
+
+interface VideoSummary {
+  summary: string;
+  key_topics: string[];
+}
+
 export default function VideoPage() {
   const { id } = useParams();
   const { user } = useAuth();
   
   const [videoUrl, setVideoUrl] = useState<string>("");
-  const [videoMeta, setVideoMeta] = useState<any>(null);
+  const [videoMeta, setVideoMeta] = useState<VideoMeta | null>(null);
   const [activeTab, setActiveTab] = useState<"timeline" | "summary" | "flashcards" | "quiz" | "chat">("timeline");
   
-  const [summary, setSummary] = useState<any>(null);
-  const [chapters, setChapters] = useState<any[]>([]);
-  const [flashcards, setFlashcards] = useState<any[]>([]);
-  const [quiz, setQuiz] = useState<any[]>([]);
+  const [summary, setSummary] = useState<VideoSummary | null>(null);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [flashcards, setFlashcards] = useState<Flashcard[]>([]);
+  const [quiz, setQuiz] = useState<QuizQuestion[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Chat state lifted here so it persists across tab switches
@@ -83,6 +113,7 @@ export default function VideoPage() {
     video.addEventListener("durationchange", handleDurationChange);
 
     return () => {
+      // Use the captured `video` variable (not videoRef.current) in cleanup
       video.removeEventListener("timeupdate", handleTimeUpdate);
       video.removeEventListener("durationchange", handleDurationChange);
     };
@@ -112,7 +143,8 @@ export default function VideoPage() {
   }, []);
 
   useEffect(() => {
-    if (videoUrl && videoRef.current) {
+    const video = videoRef.current;
+    if (videoUrl && video) {
       const params = new URLSearchParams(window.location.search);
       const t = params.get('t');
       if (t) {
@@ -122,8 +154,8 @@ export default function VideoPage() {
             videoRef.current.play().catch(() => {});
           }
         };
-        videoRef.current.addEventListener('loadedmetadata', handleMeta);
-        return () => videoRef.current?.removeEventListener('loadedmetadata', handleMeta);
+        video.addEventListener('loadedmetadata', handleMeta);
+        return () => video.removeEventListener('loadedmetadata', handleMeta);
       }
     }
   }, [videoUrl]);
@@ -228,7 +260,7 @@ export default function VideoPage() {
           <div className="bg-card/50 p-6 rounded-3xl border border-border/50">
             <h2 className="text-2xl font-bold mb-2 text-foreground">{videoMeta?.title}</h2>
             <div className="text-sm font-medium text-muted-foreground flex gap-3 items-center">
-              <span>{new Date(videoMeta?.created_at).toLocaleDateString()}</span>
+              <span>{videoMeta ? new Date(videoMeta.created_at).toLocaleDateString() : ""}</span>
               <span>•</span>
               <span className="uppercase tracking-wider text-[11px] font-bold px-2.5 py-1 bg-secondary rounded-md">{videoMeta?.status}</span>
             </div>
@@ -242,7 +274,7 @@ export default function VideoPage() {
             {["timeline", "summary", "flashcards", "quiz", "chat"].map((tab) => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab as any)}
+                onClick={() => setActiveTab(tab as "timeline" | "summary" | "flashcards" | "quiz" | "chat")}
                 className={`py-4 text-center text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all border-b-2 ${
                   activeTab === tab 
                     ? "border-primary text-primary bg-primary/5" 

@@ -194,7 +194,7 @@ export default function Dashboard() {
             </div>
           ) : videos.length === 0 ? (
             <div className="text-center py-24 border border-border/50 rounded-3xl bg-card/30">
-              <p className="text-muted-foreground text-lg">You haven't uploaded any videos yet.</p>
+              <p className="text-muted-foreground text-lg">You haven&apos;t uploaded any videos yet.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">

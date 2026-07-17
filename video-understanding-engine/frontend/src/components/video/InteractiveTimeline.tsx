@@ -1,4 +1,11 @@
-export function InteractiveTimeline({ chapters, onSeek }: { chapters: any[], onSeek: (time: number) => void }) {
+interface Chapter {
+  title: string;
+  start_time: number;
+  end_time: number;
+  summary?: string;
+}
+
+export function InteractiveTimeline({ chapters, onSeek }: { chapters: Chapter[], onSeek: (time: number) => void }) {
   if (!chapters.length) return <div className="p-6 text-muted-foreground text-center mt-10">No chapters found for this video.</div>;
   
   return (

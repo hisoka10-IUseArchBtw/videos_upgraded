@@ -23,8 +23,8 @@ export default function SignupPage() {
         body: JSON.stringify({ username, email, password }),
       });
       router.push("/login");
-    } catch (err: any) {
-      setError(err.message || "Failed to create account");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create account");
     } finally {
       setLoading(false);
     }
