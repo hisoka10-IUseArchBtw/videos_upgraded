@@ -1,0 +1,17 @@
+# PostgreSQL Services
+# ClusterIP for internal access + Headless for StatefulSet DNS
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: video-engine
+  labels:
+    app: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+  type: ClusterIP

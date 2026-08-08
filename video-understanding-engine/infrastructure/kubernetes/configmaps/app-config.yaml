@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vue-config
+  namespace: video-engine
+data:
+  # --- Service URLs (K8s internal DNS) ---
+  DATABASE_URL: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres.video-engine.svc.cluster.local:5432/$(POSTGRES_DB)"
+  REDIS_URL: "redis://redis.video-engine.svc.cluster.local:6379/0"
+  QDRANT_URL: "http://qdrant.video-engine.svc.cluster.local:6333"
+  MINIO_ENDPOINT: "minio.video-engine.svc.cluster.local:9000"
+  MINIO_SECURE: "false"
+
+  # --- App config ---
+  LOG_LEVEL: "info"
+  ENVIRONMENT: "production"
+  CELERY_BROKER_URL: "redis://redis.video-engine.svc.cluster.local:6379/0"
+  CELERY_RESULT_BACKEND: "redis://redis.video-engine.svc.cluster.local:6379/1"
+
+  # --- CORS ---
+  # Update this to your actual domain or frontend IP
+  CORS_ALLOW_ORIGINS: "*"

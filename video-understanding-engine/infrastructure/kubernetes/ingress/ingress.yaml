@@ -1,0 +1,44 @@
+# Traefik Ingress — routes external traffic to API and Grafana
+# K3s bundles Traefik by default, no extra installation needed.
+#
+# If you prefer NGINX instead, install it and change ingressClassName to "nginx":
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: vue-ingress
+  namespace: video-engine
+  annotations:
+    # Allow large video uploads (500MB)
+    traefik.ingress.kubernetes.io/buffering-maxrequestbodybytes: "524288000"
+    # Enable TLS via cert-manager (Let's Encrypt)
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: traefik
+  # TLS configuration
+  tls:
+    - hosts:
+        - api.130.210.13.32.sslip.io
+        - grafana.130.210.13.32.sslip.io
+      secretName: vue-tls-secret
+  rules:
+    - host: api.130.210.13.32.sslip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8000
+    - host: grafana.130.210.13.32.sslip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 3000

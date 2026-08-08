@@ -1,0 +1,116 @@
+# FastAPI Application Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: video-engine
+  labels:
+    app: api
+    app.kubernetes.io/part-of: video-understanding-engine
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      # Wait for stateful services before starting
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command: ['sh', '-c',
+            'until nc -z postgres.video-engine.svc.cluster.local 5432; do echo waiting for postgres; sleep 3; done']
+        - name: wait-for-redis
+          image: busybox:1.36
+          command: ['sh', '-c',
+            'until nc -z redis.video-engine.svc.cluster.local 6379; do echo waiting for redis; sleep 3; done']
+        - name: wait-for-qdrant
+          image: busybox:1.36
+          command: ['sh', '-c',
+            'until nc -z qdrant.video-engine.svc.cluster.local 6333; do echo waiting for qdrant; sleep 3; done']
+      containers:
+        - name: api
+          # IMPORTANT: Replace with your actual image from Docker Hub or registry
+          # Example: yourdockerhubuser/vue-api:latest
+          image: vue-api:latest
+          imagePullPolicy: IfNotPresent   # Use Always when pulling from remote registry
+          ports:
+            - containerPort: 8000
+          env:
+            # --- From Secrets ---
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: vue-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vue-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: vue-secrets
+                  key: POSTGRES_DB
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vue-secrets
+                  key: MINIO_ROOT_USER
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vue-secrets
+                  key: MINIO_ROOT_PASSWORD
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vue-secrets
+                  key: GEMINI_API_KEY
+            - name: GROQ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vue-secrets
+                  key: GROQ_API_KEY
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vue-secrets
+                  key: JWT_SECRET_KEY
+            # --- From ConfigMap ---
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres.video-engine.svc.cluster.local:5432/$(POSTGRES_DB)"
+            - name: REDIS_URL
+              value: "redis://redis.video-engine.svc.cluster.local:6379/0"
+            - name: QDRANT_URL
+              value: "http://qdrant.video-engine.svc.cluster.local:6333"
+            - name: MINIO_ENDPOINT
+              value: "minio.video-engine.svc.cluster.local:9000"
+            - name: MINIO_EXTERNAL_ENDPOINT
+              value: "minio.video-engine.svc.cluster.local:9000"
+            - name: MINIO_SECURE
+              value: "false"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1500m"
+              memory: "1.5Gi"
+          livenessProbe:
+            httpGet:
+              path: /docs
+              port: 8000
+            initialDelaySeconds: 45
+            periodSeconds: 15
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /docs
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 10

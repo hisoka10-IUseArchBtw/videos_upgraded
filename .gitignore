@@ -4,3 +4,4 @@ directories.md
 video_venv
 __pycache__
 .env
+infrastructure/kubernetes/secrets/secrets.yaml
